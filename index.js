@@ -1,29 +1,26 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client } = require('discord.js-selfbot-v13');
 require('dotenv').config();
 
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
-    ] 
+// Menggunakan Client khusus selfbot (tidak perlu GatewayIntents seperti bot resmi)
+const client = new Client({
+    checkUpdate: false
 });
 
 const TOKEN = process.env.DISCORD_TOKEN; 
 const messageToSend = "/cac import"; 
-const delay = 3500; // Jeda aman 3.5 detik dari rate-limit
+const delay = 4000; // Jeda diubah ke 4 detik agar lebih aman untuk akun user
 
-// Mengambil daftar channel yang diizinkan dari Railway (dipisahkan koma)
+// Mengambil daftar channel yang diizinkan dari Railway
 const allowedChannels = process.env.ALLOWED_CHANNELS 
     ? process.env.ALLOWED_CHANNELS.split(',').map(id => id.trim()) 
     : [];
 
-// Map untuk mengelola status aktif dan timeout tiap channel secara terpisah
+// Map untuk mengelola status loop per channel
 const activeChannels = new Map();
 
 client.once('ready', () => {
-    console.log(`🤖 Bot Multi-Channel Online sebagai: ${client.user.tag}`);
-    console.log(`📋 Channel Terdaftar:`, allowedChannels);
+    console.log(`✅ Selfbot Berhasil Online! Masuk sebagai akun: ${client.user.tag}`);
+    console.log(`📋 Channel Terdaftar di Whitelist:`, allowedChannels);
 });
 
 // Fungsi pengetikan otomatis per channel
@@ -33,13 +30,13 @@ async function startAutoType(channelId) {
 
     try {
         const channel = await client.channels.fetch(channelId);
-        if (channel && channel.isTextBased()) {
+        if (channel) {
             await channel.send(messageToSend);
-            console.log(`✉️ Pesan dikirim ke channel: ${channelId}`);
+            console.log(`✉️ [${client.user.username}] Mengirim ke channel: ${channelId}`);
             
             if (channelState.timeoutId) clearTimeout(channelState.timeoutId);
 
-            // Set loop timeout untuk channel ini
+            // Loop otomatis menggunakan timeout
             const newTimeoutId = setTimeout(() => {
                 startAutoType(channelId);
             }, delay);
@@ -51,7 +48,8 @@ async function startAutoType(channelId) {
         }
     } catch (error) {
         console.error(`❌ Gagal di channel ${channelId}:`, error.message);
-        if (error.code === 50001 || error.code === 10003) {
+        // Jika token tidak punya akses atau channel hilang, hapus dari memori
+        if (error.message.includes('Missing Access') || error.message.includes('Unknown Channel')) {
             activeChannels.delete(channelId);
         }
     }
@@ -59,19 +57,22 @@ async function startAutoType(channelId) {
 
 // Listener pesan masuk
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-
     const channelId = message.channel.id;
+
+    // PENTING: Karena ini selfbot, perintah /cac bisa dipicu oleh akun kamu sendiri
+    // Jika ingin orang lain juga bisa memicu bot kamu, hapus proteksi di bawah ini
+    if (message.author.id !== client.user.id) return;
 
     // Aktifkan Fitur
     if (message.content === '/cac') {
-        // Cek apakah channel ID terdaftar di whitelist
         if (!allowedChannels.includes(channelId)) {
-            return message.reply("❌ **Maaf, bot tidak diizinkan berjalan di channel ini.**");
+            console.log(`⚠️ Perintah /cac diabaikan karena channel ${channelId} tidak ada di whitelist Railway.`);
+            return;
         }
 
         if (activeChannels.has(channelId) && activeChannels.get(channelId).isRunning) {
-            return message.reply("⚠️ **Bot sudah aktif di channel ini!**");
+            console.log(`ℹ️ Bot sudah berjalan di channel ${channelId}`);
+            return;
         }
 
         activeChannels.set(channelId, {
@@ -79,7 +80,7 @@ client.on('messageCreate', async (message) => {
             timeoutId: null
         });
 
-        message.reply("🤖 **Auto-typing mode AKTIF.** Mengirim '/cac import' secara berkala di channel ini.");
+        console.log(`🤖 Mode otomatis aktif untuk channel ${channelId}`);
         startAutoType(channelId);
     }
     
@@ -92,18 +93,17 @@ client.on('messageCreate', async (message) => {
         if (channelState) {
             if (channelState.timeoutId) clearTimeout(channelState.timeoutId);
             activeChannels.delete(channelId);
-            message.reply("🛑 **Auto-typing mode NONAKTIF** di channel ini.");
-        } else {
-            message.reply("ℹ️ Bot sedang tidak aktif di channel ini.");
+            console.log(`🛑 Mode otomatis berhenti untuk channel ${channelId}`);
         }
     }
 });
 
 if (!TOKEN) {
-    console.error("❌ Eror: Variabel DISCORD_TOKEN tidak ditemukan di Railway!");
+    console.error("❌ Eror: Variabel DISCORD_TOKEN dari F12 tidak ditemukan di Railway!");
     process.exit(1);
 }
 
+// Login menggunakan token user biasa
 client.login(TOKEN).catch(err => {
-    console.error("❌ Gagal login. Periksa token Anda:", err.message);
+    console.error("❌ Login Gagal! Pastikan Token dari F12 Anda masih aktif dan belum di-logout:", err.message);
 });
