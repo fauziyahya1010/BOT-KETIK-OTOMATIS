@@ -1,13 +1,13 @@
 {
-  "name": "discord-selfbot-autotype",
+  "name": "discord-button-cac",
   "version": "1.0.0",
-  "description": "Selfbot otomatisasi ketik untuk akun user Discord",
+  "description": "Bot pemicu cac import menggunakan reaction button",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js-selfbot-v13": "^2.3.9",
+    "discord.js": "^14.14.1",
     "dotenv": "^16.4.5"
   },
   "engines": {
