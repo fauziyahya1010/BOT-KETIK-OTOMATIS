@@ -1,114 +1,94 @@
-const { Client } = require('discord.js-selfbot-v13');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 require('dotenv').config();
 
-// === PATCH UNTUK MEMPERBAIKI EROR TYPERROR (friend_source_flags) ===
-try {
-    const ClientUserSettingManager = require('discord.js-selfbot-v13/src/managers/ClientUserSettingManager');
-    const originalPatch = ClientUserSettingManager.prototype._patch;
-    
-    ClientUserSettingManager.prototype._patch = function(data) {
-        // Jika data friend_source_flags null atau tidak ada, buatkan objek kosong agar tidak error .all
-        if (data && !data.friend_source_flags) {
-            data.friend_source_flags = { all: false, mutual_friends: false, mutual_guilds: false };
-        }
-        return originalPatch.call(this, data);
-    };
-    console.log("✅ Patch untuk friend_source_flags berhasil diterapkan.");
-} catch (e) {
-    console.error("❌ Gagal menerapkan patch internal:", e.message);
-}
-// ===================================================================
-
-const client = new Client({
-    checkUpdate: false
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent
+    ] 
 });
 
 const TOKEN = process.env.DISCORD_TOKEN; 
-const messageToSend = "/cac import"; 
-const delay = 4000; // 4 detik aman untuk selfbot
 
+// Mengambil daftar channel yang diizinkan dari Railway
 const allowedChannels = process.env.ALLOWED_CHANNELS 
     ? process.env.ALLOWED_CHANNELS.split(',').map(id => id.trim()) 
     : [];
 
-const activeChannels = new Map();
-
 client.once('ready', () => {
-    console.log(`✅ Selfbot Berhasil Online! Akun: ${client.user.tag}`);
+    console.log(`🤖 Bot Tombol Instan Online: ${client.user.tag}`);
     console.log(`📋 Whitelist Channel:`, allowedChannels);
 });
 
-async function startAutoType(channelId) {
-    const channelState = activeChannels.get(channelId);
-    if (!channelState || !channelState.isRunning) return;
-
-    try {
-        const channel = await client.channels.fetch(channelId);
-        if (channel) {
-            await channel.send(messageToSend);
-            console.log(`✉️ [${client.user.username}] Mengirim ke: ${channelId}`);
-            
-            if (channelState.timeoutId) clearTimeout(channelState.timeoutId);
-
-            const newTimeoutId = setTimeout(() => {
-                startAutoType(channelId);
-            }, delay);
-
-            activeChannels.set(channelId, {
-                isRunning: true,
-                timeoutId: newTimeoutId
-            });
-        }
-    } catch (error) {
-        console.error(`❌ Gagal di channel ${channelId}:`, error.message);
-        if (error.message.includes('Missing Access') || error.message.includes('Unknown Channel')) {
-            activeChannels.delete(channelId);
-        }
-    }
-}
-
+// Listener untuk memunculkan tombol pertama kali via chat
 client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
     const channelId = message.channel.id;
 
-    // Hanya merespons jika Anda sendiri yang mengetik /cac atau /stop
-    if (message.author.id !== client.user.id) return;
-
-    if (message.content === '/cac') {
+    // Ketik perintah manual ini sekali saja untuk memunculkan tombol panel di channel tersebut
+    if (message.content === '!setup-cac') {
         if (!allowedChannels.includes(channelId)) {
-            console.log(`⚠️ Channel ${channelId} tidak ada di whitelist Railway.`);
-            return;
+            return message.reply("❌ **Maaf, bot tidak diizinkan di channel ini.**");
         }
 
-        if (activeChannels.has(channelId) && activeChannels.get(channelId).isRunning) {
-            return;
-        }
+        // Membuat komponen tombol
+        const row = new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId('click_to_cac')
+                    .setLabel('🚀 Kirim /cac import')
+                    .setStyle(ButtonStyle.Primary) // Tombol berwarna biru blurple
+            );
 
-        activeChannels.set(channelId, {
-            isRunning: true,
-            timeoutId: null
+        await message.channel.send({
+            content: "🤖 **Panel Kontrol /cac import**\nKlik tombol di bawah ini untuk mengirim perintah secara instan tanpa mengetik!",
+            components: [row]
         });
-
-        console.log(`🤖 Mode otomatis aktif untuk channel ${channelId}`);
-        startAutoType(channelId);
     }
-    
-    if (message.content === '/stop') {
-        if (!allowedChannels.includes(channelId)) return;
+});
 
-        const channelState = activeChannels.get(channelId);
-        if (channelState) {
-            if (channelState.timeoutId) clearTimeout(channelState.timeoutId);
-            activeChannels.delete(channelId);
-            console.log(`🛑 Mode otomatis berhenti untuk channel ${channelId}`);
+// Listener khusus untuk menangani klik tombol
+client.on('interactionCreate', async (interaction) => {
+    // Pastikan interaksi berasal dari komponen tombol
+    if (!interaction.isButton()) return;
+
+    const channelId = interaction.channelId;
+
+    // Cek apakah tombol yang diklik memiliki ID 'click_to_cac'
+    if (interaction.customId === 'click_to_cac') {
+        // Proteksi ganda whitelist channel
+        if (!allowedChannels.includes(channelId)) {
+            return interaction.reply({ 
+                content: "❌ Channel ini tidak diizinkan.", 
+                ephemeral: true 
+            });
+        }
+
+        try {
+            // Karena bot resmi tidak bisa mengirim slash command milik bot lain secara teks mentah,
+            // Kita akali dengan mengirim pesan teks konfirmasi publik di channel tersebut 
+            // yang akan dibaca oleh bot target sebagai pemicu.
+            await interaction.channel.send("/cac import");
+
+            // Beri respon balik ke user yang klik (ephemeral: true artinya pesan hanya terlihat oleh kamu)
+            await interaction.reply({
+                content: "✅ Perintah `/cac import` berhasil dikirim!",
+                ephemeral: true
+            });
+
+        } catch (error) {
+            console.error("❌ Gagal merespons tombol:", error.message);
         }
     }
 });
 
 if (!TOKEN) {
-    console.error("❌ Eror: Variabel DISCORD_TOKEN tidak ditemukan di Railway!");
+    console.error("❌ Eror: DISCORD_TOKEN tidak ditemukan di Railway!");
     process.exit(1);
 }
 
 client.login(TOKEN).catch(err => {
-    console.error("❌ Login Gagal:", err.message);
+    console.error("❌ Gagal login ke Discord:", err.message);
 });
