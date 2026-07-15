@@ -1,15 +1,28 @@
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client } = require('discord.js-selfbot-v13');
+const express = require('express');
 require('dotenv').config();
 
-const client = new Client({ 
-    intents: [
-        GatewayIntentBits.Guilds, 
-        GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.MessageContent
-    ] 
-});
+// === PATCH USER SETTINGS (Anti-Crash) ===
+try {
+    const ClientUserSettingManager = require('discord.js-selfbot-v13/src/managers/ClientUserSettingManager');
+    const originalPatch = ClientUserSettingManager.prototype._patch;
+    ClientUserSettingManager.prototype._patch = function(data) {
+        if (data && !data.friend_source_flags) {
+            data.friend_source_flags = { all: false, mutual_friends: false, mutual_guilds: false };
+        }
+        return originalPatch.call(this, data);
+    };
+    console.log("✅ Patch internal berhasil diterapkan.");
+} catch (e) {
+    console.error(e.message);
+}
+// ========================================
 
-const TOKEN = process.env.DISCORD_TOKEN; 
+const client = new Client({ checkUpdate: false });
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+const TOKEN = process.env.DISCORD_TOKEN;
 
 // Mengambil daftar channel yang diizinkan dari Railway
 const allowedChannels = process.env.ALLOWED_CHANNELS 
@@ -17,78 +30,47 @@ const allowedChannels = process.env.ALLOWED_CHANNELS
     : [];
 
 client.once('ready', () => {
-    console.log(`🤖 Bot Tombol Instan Online: ${client.user.tag}`);
-    console.log(`📋 Whitelist Channel:`, allowedChannels);
+    console.log(`✅ Akun F12 Online: ${client.user.tag}`);
+    console.log(`📋 Channel Terdaftar:`, allowedChannels);
 });
 
-// Listener untuk memunculkan tombol pertama kali via chat
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+// Endpoint dinamis menggunakan ID Channel (:channelId)
+app.get('/kirim-cac/:channelId', async (req, res) => {
+    const targetChannel = req.params.channelId;
 
-    const channelId = message.channel.id;
+    // Cek Keamanan: Apakah channel ID ini terdaftar di whitelist Railway?
+    if (!allowedChannels.includes(targetChannel)) {
+        return res.status(403).send("❌ Gagal: ID Channel ini tidak terdaftar di whitelist Railway kamu!");
+    }
 
-    // Ketik perintah manual ini sekali saja untuk memunculkan tombol panel di channel tersebut
-    if (message.content === '!setup-cac') {
-        if (!allowedChannels.includes(channelId)) {
-            return message.reply("❌ **Maaf, bot tidak diizinkan di channel ini.**");
+    try {
+        const channel = await client.channels.fetch(targetChannel);
+        if (channel) {
+            // Memicu Slash Command asli milik bot target di channel tersebut
+            const commands = await channel.getSlashCommands();
+            const targetCommand = commands.find(cmd => cmd.name === 'cac');
+
+            if (targetCommand) {
+                await targetCommand.send();
+                return res.send(`🚀 Sukses! Akunmu berhasil memicu /cac import di channel: ${targetChannel}`);
+            } else {
+                // Cadangan jika slash command bot target sedang tidak merespons
+                await channel.send("/cac import");
+                return res.send(`✉️ Sukses mengirim teks biasa ke channel: ${targetChannel}`);
+            }
         }
-
-        // Membuat komponen tombol
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder()
-                    .setCustomId('click_to_cac')
-                    .setLabel('🚀 Kirim /cac import')
-                    .setStyle(ButtonStyle.Primary) // Tombol berwarna biru blurple
-            );
-
-        await message.channel.send({
-            content: "🤖 **Panel Kontrol /cac import**\nKlik tombol di bawah ini untuk mengirim perintah secara instan tanpa mengetik!",
-            components: [row]
-        });
+    } catch (error) {
+        return res.status(500).send(`❌ Eror: ${error.message}`);
     }
 });
 
-// Listener khusus untuk menangani klik tombol
-client.on('interactionCreate', async (interaction) => {
-    // Pastikan interaksi berasal dari komponen tombol
-    if (!interaction.isButton()) return;
-
-    const channelId = interaction.channelId;
-
-    // Cek apakah tombol yang diklik memiliki ID 'click_to_cac'
-    if (interaction.customId === 'click_to_cac') {
-        // Proteksi ganda whitelist channel
-        if (!allowedChannels.includes(channelId)) {
-            return interaction.reply({ 
-                content: "❌ Channel ini tidak diizinkan.", 
-                ephemeral: true 
-            });
-        }
-
-        try {
-            // Karena bot resmi tidak bisa mengirim slash command milik bot lain secara teks mentah,
-            // Kita akali dengan mengirim pesan teks konfirmasi publik di channel tersebut 
-            // yang akan dibaca oleh bot target sebagai pemicu.
-            await interaction.channel.send("/cac import");
-
-            // Beri respon balik ke user yang klik (ephemeral: true artinya pesan hanya terlihat oleh kamu)
-            await interaction.reply({
-                content: "✅ Perintah `/cac import` berhasil dikirim!",
-                ephemeral: true
-            });
-
-        } catch (error) {
-            console.error("❌ Gagal merespons tombol:", error.message);
-        }
-    }
+app.listen(PORT, () => {
+    console.log(`🌐 Web Trigger Multi-Channel aktif di port ${PORT}`);
 });
 
 if (!TOKEN) {
-    console.error("❌ Eror: DISCORD_TOKEN tidak ditemukan di Railway!");
+    console.error("❌ Eror: DISCORD_TOKEN F12 belum diisi di Railway!");
     process.exit(1);
 }
 
-client.login(TOKEN).catch(err => {
-    console.error("❌ Gagal login ke Discord:", err.message);
-});
+client.login(TOKEN);
