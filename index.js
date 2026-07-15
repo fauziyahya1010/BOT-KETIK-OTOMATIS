@@ -29,74 +29,74 @@ const allowedChannels = process.env.ALLOWED_CHANNELS
     ? process.env.ALLOWED_CHANNELS.split(',').map(id => id.trim()) 
     : [];
 
-client.once('ready', () => {
+client.once('ready', async () => {
     console.log(`✅ Akun F12 Aktif: ${client.user.tag}`);
     console.log(`📋 Whitelist Channel:`, allowedChannels);
-    console.log(`🎯 Tombol Pemicu: Emoji ${TARGET_EMOJI}`);
-});
-
-// Otomatis menempelkan emoji ke setiap ada pesan baru dari orang/bot lain
-client.on('messageCreate', async (message) => {
-    const channelId = message.channel.id;
-    if (!allowedChannels.includes(channelId)) return;
-    if (message.author.id === client.user.id) return;
-
-    try {
-        await message.react(TARGET_EMOJI);
-        console.log(`➕ Otomatis menempelkan tombol emoji ke pesan baru.`);
-    } catch (error) {
-        console.error(`❌ Gagal menempelkan emoji otomatis:`, error.message);
+    
+    // SETUP TOMBOL ABADI SAAT BOT NYALA
+    for (const channelId of allowedChannels) {
+        try {
+            const channel = await client.channels.fetch(channelId);
+            if (channel) {
+                // Cari apakah sudah pernah ada pesan tombol dari bot ini sebelumnya
+                const messages = await channel.messages.fetch({ limit: 50 });
+                const existingBotMessage = messages.find(m => m.author.id === client.user.id && m.content.includes("🔘 TOMBOL UTAMA CAC IMPORT 🔘"));
+                
+                if (!existingBotMessage) {
+                    // Jika belum ada, kirim pesan baru untuk dijadikan tombol abadi
+                    const msg = await channel.send("🔘 **TOMBOL UTAMA CAC IMPORT** 🔘\n\n➔ *Klik emoji di bawah untuk memicu panel /cac import secara instan!*");
+                    await msg.react(TARGET_EMOJI);
+                    console.log(`📢 Pesan tombol abadi baru berhasil dibuat di channel: ${channelId}`);
+                } else {
+                    // Jika sudah ada, pastikan emojinya tetap terpasang
+                    await existingBotMessage.react(TARGET_EMOJI);
+                    console.log(`🔄 Menggunakan pesan tombol abadi yang sudah ada di channel: ${channelId}`);
+                }
+            }
+        } catch (err) {
+            console.error(`⚠️ Gagal setup tombol di channel ${channelId}:`, err.message);
+        }
     }
 });
 
-// FUNGSI UTAMA: Eksekutor kirim perintah /cac import
+// FUNGSI UTAMA: Eksekutor kirim perintah /cac import ke API Discord
 async function eksekusiCac(channelObj) {
     try {
-        // Cara yang benar untuk mengambil slash command di selfbot-v13:
-        // Kita panggil getSlashCommands langsung dari client dengan parameter ID channel
         const commands = await client.getSlashCommands(channelObj.id);
         const targetCommand = commands.find(cmd => cmd.name === 'cac');
 
         if (targetCommand) {
-            // Jalankan perintah /cac import asli bawaan bot game
             await targetCommand.send();
-            console.log(`🚀 Sukses memicu Slash Command asli via klik emoji!`);
+            console.log(`🚀 Sukses memicu popup panel /cac import!`);
         } else {
-            // Cadangan teks biasa jika bot target tidak merespons API
             await channelObj.send("/cac import");
-            console.log(`✉️ Perintah /cac tak deteksi, mengirim teks biasa sebagai cadangan.`);
+            console.log(`✉️ Mengirim teks cadangan /cac import.`);
         }
     } catch (error) {
-        console.error(`❌ Gagal mengeksekusi perintah:`, error.message);
-        // Upayakan kirim teks biasa jika pencarian command eror kembali
-        try {
-            await channelObj.send("/cac import");
-        } catch (err) {
-            console.error(`❌ Benar-benar gagal kirim pesan:`, err.message);
-        }
+        console.error(`❌ Gagal memicu:`, error.message);
+        try { await channelObj.send("/cac import"); } catch (e) {}
     }
 }
 
-// TRIGGER 1: Ketika emoji dicentang/diklik oleh kamu
+// TRIGGER 1: Ketika emoji dicentang/diklik
 client.on('messageReactionAdd', async (reaction, user) => {
     if (user.id !== client.user.id) return;
-    const channelId = reaction.message.channel.id;
-    if (!allowedChannels.includes(channelId)) return;
+    if (!allowedChannels.includes(reaction.message.channel.id)) return;
 
-    if (reaction.emoji.name === TARGET_EMOJI) {
-        console.log(`🎯 Tombol diklik! Memproses pengiriman ke channel: ${channelId}`);
+    // Pastikan yang diklik adalah pesan tombol utama kita
+    if (reaction.message.content.includes("🔘 TOMBOL UTAMA CAC IMPORT 🔘") && reaction.emoji.name === TARGET_EMOJI) {
+        console.log(`🎯 Tombol ditekan! Memicu panel...`);
         await eksekusiCac(reaction.message.channel);
     }
 });
 
-// TRIGGER 2: Ketika emoji diklik lagi untuk dilepas (Biar bisa klik berkali-kali)
+// TRIGGER 2: Ketika emoji diklik lagi untuk dilepas (Biar stand-by terus tanpa hilang)
 client.on('messageReactionRemove', async (reaction, user) => {
     if (user.id !== client.user.id) return;
-    const channelId = reaction.message.channel.id;
-    if (!allowedChannels.includes(channelId)) return;
+    if (!allowedChannels.includes(reaction.message.channel.id)) return;
 
-    if (reaction.emoji.name === TARGET_EMOJI) {
-        console.log(`🎯 Tombol dilepas! Memproses pengiriman ulang ke channel: ${channelId}`);
+    if (reaction.message.content.includes("🔘 TOMBOL UTAMA CAC IMPORT 🔘") && reaction.emoji.name === TARGET_EMOJI) {
+        console.log(`🎯 Tombol dilepas! Memicu ulang panel...`);
         await eksekusiCac(reaction.message.channel);
     }
 });
